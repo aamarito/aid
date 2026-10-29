@@ -1,0 +1,10 @@
+# Your Supabase keys (see README: commit it or let the Pages workflow write it)
+js/config.js
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+node_modules/
