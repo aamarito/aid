@@ -1,6 +1,6 @@
 // aamaritoaid — app entry point
 import { initClient, sb } from "./lib/supabase.js";
-import { S, U, ROUTES, NOUN, TASK_STATUS, EXP_STATUS, PROD_STATUS, PEOPLE_STATUS, ROLES, session, role, can, myId } from "./state.js";
+import { S, U, ROUTES, NOUN, TASK_STATUS, EXP_STATUS, PROD_STATUS, PEOPLE_STATUS, session, role, can, myId, roleLabel, companyById, activeCompanies, scoped } from "./state.js";
 import { $, $$, esc, icon, toast, num, opt, money, qty, today, downloadFile } from "./util.js";
 import * as data from "./data.js";
 import * as auth from "./auth.js";
@@ -8,19 +8,20 @@ import { VIEWS, personById, openTasks, lowStock, pendingUsers, filteredExpenses,
 import * as drawer from "./drawer.js";
 
 // ---------------------------------------------------------------- render
-function visibleRoutes() { return ROUTES.filter((r) => !r.admin || can.admin()); }
+function visibleRoutes() { return ROUTES.filter((r) => can.route(r)); }
+const MOBILE = ["overview", "expenses", "tasks", "products", "people", "workspace"];
 
 function navHTML(mobile) {
   const counts = {
-    expenses: can.approve() ? S.expenses.filter((e) => e.status === "pending").length : 0,
+    expenses: can.approve() ? scoped("expenses").filter((e) => e.status === "pending").length : 0,
     tasks: openTasks().length,
     products: lowStock().length,
-    people: S.people.filter((p) => p.status !== "inactive").length,
-    members: pendingUsers().length,
+    people: scoped("people").filter((p) => p.status !== "inactive").length,
+    members: can.users() ? pendingUsers().length : 0,
   };
   const hot = { expenses: 1, products: 1, members: 1 };
   const tips = { expenses: "Waiting for your approval", tasks: "Open tasks", products: "Low on stock", people: "Active people", members: "Waiting for access" };
-  return visibleRoutes().map((r) => {
+  return visibleRoutes().filter((r) => !mobile || MOBILE.includes(r.id)).map((r) => {
     const c = counts[r.id]; const cur = U.route === r.id ? ' aria-current="page"' : "";
     if (mobile) return `<a href="#${r.id}"${cur}>${icon(r.icon)}<span>${esc(r.short || r.label)}</span></a>`;
     return `${r.sep ? '<div class="sep"></div>' : ""}<a href="#${r.id}"${cur}>${icon(r.icon)}<span>${esc(r.label)}</span>${c ? `<span class="cnt${hot[r.id] ? " hot" : ""}" title="${tips[r.id]}">${c}</span>` : ""}</a>`;
@@ -30,19 +31,29 @@ function navHTML(mobile) {
 function renderChrome() {
   $("#nav").innerHTML = navHTML(false);
   $("#bnav").innerHTML = navHTML(true);
-  $("#coName").textContent = S.ws.company && S.ws.company !== "aamaritoaid" ? S.ws.company : "Team workspace";
-  $("#crumb").textContent = S.ws.company || "aamaritoaid";
+  const cos = activeCompanies();
+  if (U.company && !cos.some((c) => c.id === U.company)) { U.company = ""; rememberCompany(); }
+  const cur = U.company ? companyById(U.company) : null;
+  $("#coName").textContent = cur ? cur.name : S.ws.company || "aamarito group";
+  $("#crumb").textContent = cur ? `${S.ws.company || "aamarito group"} · ${cur.name}` : S.ws.company || "aamarito group";
+  const sw = $("#coSwitch");
+  sw.hidden = cos.length < 2;
+  sw.innerHTML = `<option value="">All companies</option>${cos.map((c) => `<option value="${esc(c.id)}" ${c.id === U.company ? "selected" : ""}>${esc(c.name)}</option>`).join("")}`;
+  sw.value = U.company;
+  sw.style.setProperty("--co", cur ? cur.color : "var(--accent)");
+  document.documentElement.style.setProperty("--co-cur", cur ? cur.color : "");
   const r = ROUTES.find((x) => x.id === U.route) || ROUTES[0];
   $("#pageTitle").textContent = r.label;
-  document.title = `${r.label} · ${S.ws.company || "aamaritoaid"}`;
+  document.title = `${r.label} · ${cur ? cur.name : S.ws.company || "aamaritoaid"}`;
   const creatable = ["expenses", "tasks", "products", "people"].filter((m) => can.create(m));
   $("#newBtn").parentElement.hidden = !creatable.length;
   $("#newMenu").innerHTML = creatable.map((m) => `<button role="menuitem" data-act="new" data-mod="${m}">${icon({ expenses: "i-wallet", tasks: "i-check", products: "i-box", people: "i-users" }[m])}${esc(NOUN[m][0].toUpperCase() + NOUN[m].slice(1))}</button>`).join("");
   const p = session.profile || {};
-  $("#meBox").innerHTML = `<span class="av" style="background:#2FB4A9" aria-hidden="true">${esc((p.full_name || session.user?.email || "?").trim().slice(0, 1).toUpperCase())}</span><span class="nm"><b>${esc(p.full_name || session.user?.email || "You")}</b><small>${esc(opt(ROLES, role()).l)}</small></span>`;
+  $("#meBox").innerHTML = `<span class="av" style="background:#2FB4A9" aria-hidden="true">${esc((p.full_name || session.user?.email || "?").trim().slice(0, 1).toUpperCase())}</span><span class="nm"><b>${esc(p.full_name || session.user?.email || "You")}</b><small>${esc(roleLabel(role()))}</small></span>`;
   const dot = $("#connDot"), txt = $("#connTxt");
-  dot.className = "dot " + (S.live === "live" ? "on" : S.live === "offline" ? "off" : "");
-  txt.textContent = S.live === "live" ? "Live · synced" : S.live === "offline" ? "Reconnecting…" : "Connecting…";
+  dot.className = "dot " + (S.live === "live" ? "on" : S.live === "polling" ? "poll" : "");
+  txt.textContent = S.live === "live" ? "Live · synced" : S.live === "polling" ? "Auto-refresh every minute" : "Connecting…";
+  txt.title = S.live === "polling" ? "Live updates couldn't connect, so the page refreshes itself regularly. Your changes still save straight away." : "";
 }
 
 function render() {
@@ -75,7 +86,7 @@ async function enter() {
     try { await data.loadProfile(); } catch (e) {}
   }
   if (!can.read()) {
-    data.subscribe(onData); // hear when an admin approves us
+    data.subscribe(onData).catch(() => {}); // hear when an admin approves us
     auth.showPending(async () => { await data.loadProfile().catch(() => {}); if (can.read()) enter(); else toast("Still waiting for an admin"); });
     return;
   }
@@ -88,15 +99,21 @@ async function enter() {
   }
   $("#gate").hidden = true; $("#gate").innerHTML = "";
   $("#app").hidden = false; $("#bnav").hidden = false;
-  data.subscribe(onData);
+  lastSig = accessSig();
+  await data.subscribe(onData).catch((e) => console.warn(e));
   route();
 }
 
+let lastSig = "";
+const accessSig = () => [role(), [...S.myPerms].sort().join(","), (session.profile?.company_ids || []).join(",")].join("|");
 function onData(what) {
   if (what === "access") {
     // our own role or access changed
     if (!can.read()) { S.loaded = false; drawer.closeDrawer(); enter(); return; }
-    data.loadAll().then(() => { toast(`Your role is now ${opt(ROLES, role()).l}`); schedule(); }).catch(() => schedule());
+    if ($("#app").hidden) { enter(); return; } // just approved while on the waiting screen
+    const sig = accessSig();
+    if (sig !== lastSig) { if (lastSig) toast(`Your access was updated: ${roleLabel(role())}`); lastSig = sig; }
+    schedule();
     return;
   }
   if (!S.loaded) { if (what === "profiles" && can.read()) enter(); return; }
@@ -150,10 +167,10 @@ function runPalette() {
   const has = (vals) => vals.some((x) => String(x || "").toLowerCase().includes(q));
   const groups = [
     ["Go to", visibleRoutes().filter((r) => !q || r.label.toLowerCase().includes(q)).map((r) => ({ go: r.id, t: r.label, s: "Page" }))],
-    ["Expenses", q ? S.expenses.filter((e) => has([e.title, e.vendor, e.reference, e.category])).slice(0, 5).map((e) => ({ mod: "expenses", id: e.id, t: e.title, s: money(e.amount) })) : []],
-    ["Tasks", q ? S.tasks.filter((t) => has([t.title, t.project, t.description])).slice(0, 5).map((t) => ({ mod: "tasks", id: t.id, t: t.title, s: opt(TASK_STATUS, t.status).l })) : []],
-    ["Products", q ? S.products.filter((p) => has([p.name, p.sku, p.supplier])).slice(0, 5).map((p) => ({ mod: "products", id: p.id, t: p.name, s: p.sku || "" })) : []],
-    ["People", q ? S.people.filter((p) => has([p.name, p.role_title, p.phone, p.email])).slice(0, 5).map((p) => ({ mod: "people", id: p.id, t: p.name, s: p.role_title || "" })) : []],
+    ["Expenses", q ? scoped("expenses").filter((e) => has([e.title, e.vendor, e.reference, e.category])).slice(0, 5).map((e) => ({ mod: "expenses", id: e.id, t: e.title, s: money(e.amount) })) : []],
+    ["Tasks", q ? scoped("tasks").filter((t) => has([t.title, t.project, t.description])).slice(0, 5).map((t) => ({ mod: "tasks", id: t.id, t: t.title, s: opt(TASK_STATUS, t.status).l })) : []],
+    ["Products", q ? scoped("products").filter((p) => has([p.name, p.sku, p.supplier])).slice(0, 5).map((p) => ({ mod: "products", id: p.id, t: p.name, s: p.sku || "" })) : []],
+    ["People", q ? scoped("people").filter((p) => has([p.name, p.role_title, p.phone, p.email])).slice(0, 5).map((p) => ({ mod: "people", id: p.id, t: p.name, s: p.role_title || "" })) : []],
   ];
   if (!q) groups.push(["Create", ["expenses", "tasks", "products", "people"].filter((m) => can.create(m)).map((m) => ({ newMod: m, t: `New ${NOUN[m]}`, s: "Create" }))]);
   palHits = []; let html = "";
@@ -175,19 +192,22 @@ function palGo(i) {
 // ---------------------------------------------------------------- CSV export
 const csvCell = (v) => { v = v == null ? "" : String(v); if (/^[=+\-@]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
 function exportCSV(mod) {
+  if (!can.exportCsv()) { toast("You don't have permission to export", true); return; }
+  const co = (id) => companyById(id)?.name || "";
   let head, rows;
   if (mod === "expenses") {
-    head = ["Date", "Expense", "Category", "Vendor", "Spent by", "Paid with", "Status", "Reference", "Amount", "Notes"];
-    rows = filteredExpenses().map((e) => [e.spent_on, e.title, e.category, e.vendor, personById(e.person_id)?.name, e.method, opt(EXP_STATUS, e.status).l, e.reference, num(e.amount), e.notes]);
+    head = ["Date", "Company", "Expense", "Category", "Vendor", "Spent by", "Paid with", "Status", "Reference", "Amount", "Notes"];
+    rows = filteredExpenses().map((e) => [e.spent_on, co(e.company_id), e.title, e.category, e.vendor, personById(e.person_id)?.name, e.method, opt(EXP_STATUS, e.status).l, e.reference, num(e.amount), e.notes]);
   } else if (mod === "products") {
-    head = ["Name", "SKU", "Category", "Price", "Cost", "Margin %", "Stock", "Unit", "Reorder at", "Stock value", "Supplier", "Status"];
-    rows = S.products.map((p) => [p.name, p.sku, p.category, num(p.price), num(p.cost), Math.round(margin(p) * 100), num(p.stock), p.unit, num(p.reorder_level), num(p.stock) * num(p.cost), p.supplier, opt(PROD_STATUS, p.status).l]);
+    head = ["Company", "Name", "SKU", "Category", "Price", "Cost", "Margin %", "Stock", "Unit", "Reorder at", "Stock value", "Supplier", "Status"];
+    rows = scoped("products").map((p) => [co(p.company_id), p.name, p.sku, p.category, num(p.price), num(p.cost), Math.round(margin(p) * 100), num(p.stock), p.unit, num(p.reorder_level), num(p.stock) * num(p.cost), p.supplier, opt(PROD_STATUS, p.status).l]);
   } else {
-    head = ["Name", "Role", "Department", "Type", "Status", "Phone", "Email", "Joined", "Reports to", "Location"];
-    if (can.admin()) head.push("Monthly salary");
-    rows = S.people.map((p) => { const r = [p.name, p.role_title, p.department, p.employment_type, opt(PEOPLE_STATUS, p.status).l, p.phone, p.email, p.joined, personById(p.manager_id)?.name, p.location]; if (can.admin()) r.push(S.salaries[p.id]?.salary ?? ""); return r; });
+    head = ["Name", "Company", "Role", "Department", "Type", "Status", "Phone", "Email", "Joined", "Reports to", "Location"];
+    if (can.hr()) head.push("Monthly salary");
+    rows = scoped("people").map((p) => { const r = [p.name, p.company_id ? co(p.company_id) : "Whole group", p.role_title, p.department, p.employment_type, opt(PEOPLE_STATUS, p.status).l, p.phone, p.email, p.joined, personById(p.manager_id)?.name, p.location]; if (can.hr()) r.push(S.salaries[p.id]?.salary ?? ""); return r; });
   }
-  downloadFile(`aamaritoaid-${mod}-${today()}.csv`, "﻿" + [head, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n"));
+  const tag = U.company ? "-" + co(U.company).toLowerCase().replace(/[^a-z0-9]+/g, "-") : "";
+  downloadFile(`aamaritoaid${tag}-${mod}-${today()}.csv`, "﻿" + [head, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n"));
   toast("CSV downloaded");
 }
 
@@ -209,17 +229,29 @@ function stepStock(id, d) {
   }, 700);
 }
 
-// ---------------------------------------------------------------- admin: users
+// ---------------------------------------------------------------- users, roles, settings
 async function setUser(id, patch, msg) {
   try { await data.updateProfile(id, patch); toast(msg); schedule(); }
   catch (e) { toast(data.errText(e), true); schedule(); }
 }
-
-// ---------------------------------------------------------------- workspace settings
+async function togglePerm(box) {
+  const { r, p } = box.dataset; const on = box.checked;
+  box.disabled = true;
+  try { await data.setPermission(r, p, on); toast(`${roleLabel(r)}: ${on ? "allowed" : "removed"}`); }
+  catch (e) { box.checked = !on; toast(data.errText(e), true); }
+  box.disabled = false; schedule();
+}
 async function saveWs(patch, msg) {
   try { await data.saveWorkspace(patch); toast(msg); schedule(); }
   catch (e) { toast(data.errText(e), true); }
 }
+function pickCompany(id) {
+  U.company = id || ""; rememberCompany();
+  U.exp.sel.clear(); Object.assign(U.exp, { cat: "", person: "" }); Object.assign(U.task, { project: "", person: "" }); U.prod.cat = "";
+  render();
+  if (id) toast(`Showing ${companyById(id)?.name || "company"}`);
+}
+function rememberCompany() { try { localStorage.setItem("aa-company", U.company || ""); } catch (e) {} }
 
 // ---------------------------------------------------------------- events
 document.addEventListener("click", async (ev) => {
@@ -266,19 +298,16 @@ document.addEventListener("click", async (ev) => {
   else if (a === "pplView") { U.ppl.view = t.dataset.v; remember(); render(); }
   else if (a === "prodLow") { U.prod.low = !U.prod.low; render(); }
   else if (a === "csv") exportCSV(t.dataset.mod);
-  else if (a === "approveUser") setUser(t.dataset.id, { role: t.dataset.r, active: true }, `Approved as ${t.dataset.r}`);
+  else if (a === "openUser") drawer.openUser(t.dataset.id);
   else if (a === "declineUser") setUser(t.dataset.id, { active: false }, "Access declined");
+  else if (a === "pickCompany") pickCompany(t.dataset.id);
+  else if (a === "perm") { ev.stopPropagation(); togglePerm(t); }
+  else if (a === "newRole") drawer.openRole(null);
+  else if (a === "editRole") drawer.openRole(t.dataset.k);
+  else if (a === "delRole") { drawer.openRole(t.dataset.k); setTimeout(drawer.askDelete, 70); }
   else if (a === "wsDel") {
     const k = t.dataset.k; const arr = [...(S.ws[k] || [])]; const [gone] = arr.splice(Number(t.dataset.i), 1);
-    const patch = { [k]: arr };
-    if (k === "expense_categories") { const b = { ...(S.ws.budgets || {}) }; delete b[gone]; patch.budgets = b; }
-    saveWs(patch, `Removed ${gone}`);
-  }
-  else if (a === "addCat") {
-    const v = $("#newCat").value.trim(); if (!v) return;
-    const list = S.ws.expense_categories || [];
-    if (list.includes(v)) { toast("That category exists already", true); return; }
-    saveWs({ expense_categories: [...list, v] }, `Added ${v}`);
+    saveWs({ [k]: arr }, `Removed ${gone}`);
   }
   else if (a === "closePalette") closePalette();
   else if (a === "palGo") palGo(Number(t.dataset.i));
@@ -289,18 +318,16 @@ document.addEventListener("input", (ev) => {
   const m = map[ev.target.id];
   if (m) { U[m[0]][m[1]] = ev.target.value; schedule(); }
   if (ev.target.id === "pq") runPalette();
+  if (ev.target.id === "f_expense_categories") drawer.categoriesChanged();
 });
 document.addEventListener("change", (ev) => {
   const t = ev.target; const id = t.id;
   const map = { expMonth: ["exp", "month"], expCat: ["exp", "cat"], expStatus: ["exp", "status"], expPerson: ["exp", "person"], taskPerson: ["task", "person"], taskProject: ["task", "project"], taskPrio: ["task", "prio"], prodCat: ["prod", "cat"], prodStatus: ["prod", "status"], pplDept: ["ppl", "dept"], pplStatus: ["ppl", "status"] };
   if (map[id]) { U[map[id][0]][map[id][1]] = t.value; if (id.startsWith("exp")) U.exp.sel.clear(); render(); return; }
-  if (t.dataset.act === "setRole") {
-    const p = S.profiles.find((x) => x.id === t.dataset.id);
-    setUser(t.dataset.id, { role: t.value }, `${p?.full_name || "User"} is now ${opt(ROLES, t.value).l.toLowerCase()}`);
-  } else if (t.dataset.act === "setActive") {
-    const p = S.profiles.find((x) => x.id === t.dataset.id);
-    setUser(t.dataset.id, { active: t.checked }, `${t.checked ? "Turned on" : "Turned off"} access for ${p?.full_name || "user"}`);
-  }
+  if (id === "coSwitch") { pickCompany(t.value); return; }
+  if (id === "f_company_id") { drawer.companyChanged(); return; }
+  if (id === "uAllCo") { drawer.toggleAllCompanies(); return; }
+  if (t.closest("#drawer .switch")) { const s = t.parentElement.querySelector("span"); if (s && (s.textContent === "Yes" || s.textContent === "No")) s.textContent = t.checked ? "Yes" : "No"; }
 });
 document.addEventListener("submit", (ev) => {
   const f = ev.target;
@@ -308,25 +335,17 @@ document.addEventListener("submit", (ev) => {
   ev.preventDefault();
   if (f.id === "dform") { drawer.submit(); return; }
   const kind = f.dataset.form;
-  if (kind === "wsBasics") saveWs({ company: $("#wsCompany").value.trim() || "aamaritoaid", currency: $("#wsCurrency").value.trim() || "৳", members_see_all_expenses: $("#wsSeeAll").checked }, "Workspace saved");
-  else if (kind === "wsBudgets") {
-    const b = {}; let bad = false;
-    (S.ws.expense_categories || []).forEach((c, i) => {
-      const raw = $("#bud_" + i).value.replace(/[,\s]/g, ""); if (raw === "") return;
-      const n = parseFloat(raw); if (!isFinite(n) || n < 0) { bad = true; return; } b[c] = n;
-    });
-    if (bad) { toast("Budgets must be positive numbers", true); return; }
-    saveWs({ budgets: b }, "Budgets saved");
-  } else if (kind === "wsAdd") {
+  if (kind === "wsBasics") saveWs({ company: $("#wsCompany").value.trim() || "aamarito group", currency: $("#wsCurrency").value.trim() || "৳" }, "Settings saved");
+  else if (kind === "wsAdd") {
     const k = f.dataset.k; const inp = $("#wsAdd_" + k); const v = inp.value.trim(); if (!v) return;
-    const arr = S.ws[k] || []; if (arr.includes(v)) { toast("Already in the list", true); return; }
+    const arr = S.ws[k] || []; if (arr.some((x) => x.toLowerCase() === v.toLowerCase())) { toast("Already in the list", true); return; }
     saveWs({ [k]: [...arr, v] }, `Added ${v}`);
   }
 });
 
 // drag & drop on the task board
 let dragId = null;
-document.addEventListener("dragstart", (ev) => { const c = ev.target.closest?.(".card"); if (!c || !can.write()) return; dragId = c.dataset.id; c.classList.add("dragging"); ev.dataTransfer.effectAllowed = "move"; try { ev.dataTransfer.setData("text/plain", dragId); } catch (e) {} });
+document.addEventListener("dragstart", (ev) => { const c = ev.target.closest?.(".card"); if (!c || !can.has("tasks.edit")) return; dragId = c.dataset.id; c.classList.add("dragging"); ev.dataTransfer.effectAllowed = "move"; try { ev.dataTransfer.setData("text/plain", dragId); } catch (e) {} });
 document.addEventListener("dragend", () => { $$(".card.dragging").forEach((c) => c.classList.remove("dragging")); $$(".col.over").forEach((c) => c.classList.remove("over")); dragId = null; });
 document.addEventListener("dragover", (ev) => { const col = ev.target.closest?.(".col"); if (!col || !dragId) return; ev.preventDefault(); $$(".col.over").forEach((c) => c !== col && c.classList.remove("over")); col.classList.add("over"); });
 document.addEventListener("drop", async (ev) => {
@@ -363,6 +382,7 @@ $("#themeBtn").addEventListener("click", () => {
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.loaded) data.refreshIfStale().catch(() => {}); });
 
 function remember() { try { localStorage.setItem("aa-views", JSON.stringify({ t: U.task.view, p: U.prod.view, pp: U.ppl.view })); } catch (e) {} }
+try { U.company = localStorage.getItem("aa-company") || ""; } catch (e) {}
 try { const v = JSON.parse(localStorage.getItem("aa-views") || "{}"); if (v.t) U.task.view = v.t; if (v.p) U.prod.view = v.p; if (v.pp) U.ppl.view = v.pp; } catch (e) {}
 
 boot();

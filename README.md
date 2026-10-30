@@ -1,8 +1,19 @@
 # aamaritoaid
 
-A team workspace for **expense management, task management, product & stock management and people management**, with admin and user roles, live sync and a full audit trail.
+The workspace for the **aamarito group**: aamarito (leather goods, mother company), intivora (health & wellness) and kukarz (kitchenware & home). It covers **expenses, tasks, products & stock and people** for every company, with roles and permissions that admins edit themselves, live sync and a full audit trail.
 
 It is a static web app (plain HTML, CSS and JavaScript modules, no build step) backed by **Supabase** (Postgres, authentication, file storage and realtime). Every permission is enforced inside the database with row-level security, so the data stays safe even if someone opens the browser's developer tools.
+
+---
+
+## Upgrading from version 1
+
+Version 2 adds companies, editable roles and permissions, and admin-managed options. Your existing data is kept: every old expense, task and product is moved under **aamarito**, and old *Viewer* accounts become *Member*.
+
+1. In Supabase, open **SQL Editor → New query**, paste the whole new `supabase/schema.sql`, and click **Run**. It is safe to run more than once.
+2. On GitHub, open your **aid** repository and upload the changed files (**Add file → Upload files**, drag them in keeping their folders): `index.html`, `README.md`, `css/app.css`, `js/main.js`, `js/state.js`, `js/data.js`, `js/views.js`, `js/drawer.js`, `supabase/schema.sql`. Don't touch `js/config.js`.
+3. Wait a minute for GitHub Pages to publish, then reload the site (Ctrl Shift R).
+4. As admin, open **Companies** to check each company's categories and budgets, and **Roles & permissions** to adjust what each role can do.
 
 ---
 
@@ -38,9 +49,24 @@ It is a static web app (plain HTML, CSS and JavaScript modules, no build step) b
 - Admin-only HR fields: salary, NID, bank or bKash account, private notes (kept in a separate table only admins can read); monthly payroll total
 - Link a person to their login account
 
-**Users & access** (admins)
-- Approve or decline people who sign up, change roles, turn access on or off
-- The workspace always keeps at least one active admin
+**Companies** (admins, or anyone with *Manage companies*)
+- aamarito, intivora and kukarz come set up; add more at any time, archive ones you stop using
+- Each company has its own colour, expense categories, monthly budgets, product categories and projects
+- A company switcher at the top shows one company or the whole group; every page, chart, search and export follows it
+- People can belong to one company or to the whole group
+
+**Users & access**
+- Approve people who sign up: pick their role and which companies they may work in
+- Change anyone's role or company access, or turn access off
+- The workspace always keeps at least one active admin, and only admins can make admins
+
+**Roles & permissions** (admins)
+- Built-in roles: **Admin**, **Management**, **Member** and **Waiting**
+- A tick-box table of 17 permissions per role; changes apply immediately for everyone
+- Create new roles (for example Accountant or Store manager), optionally starting from another role's permissions
+
+**Settings**
+- Group name and currency, plus the lists used everywhere: departments, payment methods, units and employment types
 
 **Everywhere**
 - Search across everything with **Ctrl K** (or **/**)
@@ -52,23 +78,29 @@ It is a static web app (plain HTML, CSS and JavaScript modules, no build step) b
 
 ## Roles
 
-| | Admin | Member | Viewer |
-|---|:---:|:---:|:---:|
-| See dashboards, tasks, products, people | ✓ | ✓ | ✓ |
-| Log expenses (own claims) | ✓ | ✓ | |
-| Edit or delete own claim while pending | ✓ | ✓ | |
-| Approve, reject, pay out expenses | ✓ | | |
-| See everyone's expenses | ✓ | optional | ✓ |
-| Create, edit and move tasks | ✓ | ✓ | |
-| Add and edit products, adjust stock | ✓ | ✓ | |
-| Delete products | ✓ | | |
-| Add and edit people, see salaries and HR fields | ✓ | | |
-| Budgets, categories, workspace settings | ✓ | | |
-| Approve sign-ups, change roles and access | ✓ | | |
+Default permissions (admins can change everything in this table except the Admin and Waiting columns):
+
+| | Admin | Management | Member | Waiting |
+|---|:---:|:---:|:---:|:---:|
+| See tasks, products, people | ✓ | ✓ | ✓ | |
+| Log expenses, edit own claim while pending | ✓ | ✓ | ✓ | |
+| See everyone's expenses | ✓ | ✓ | | |
+| Approve, reject, pay out expenses | ✓ | ✓ | | |
+| Edit or delete anyone's expenses | ✓ | | | |
+| Create, edit and move tasks | ✓ | ✓ | ✓ | |
+| Delete any task | ✓ | ✓ | | |
+| Add and edit products, adjust stock | ✓ | ✓ | ✓ | |
+| Delete products | ✓ | ✓ | | |
+| Add and edit people | ✓ | ✓ | | |
+| Salary, NID and bank details | ✓ | | | |
+| CSV exports | ✓ | ✓ | | |
+| Approve sign-ups, change roles and company access | ✓ | | | |
+| Companies, categories, budgets, options | ✓ | | | |
 
 - The **first account that signs up becomes the admin** automatically.
-- Everyone who signs up after that waits as **pending** and sees nothing until an admin approves them.
-- An admin can turn off anyone's access instantly; their open sessions lose access straight away.
+- Everyone who signs up after that is **Waiting** and sees nothing until someone approves them.
+- Each account can be limited to some companies; they then only see and add records for those companies.
+- Turning off someone's access takes effect straight away.
 
 ---
 
@@ -134,10 +166,11 @@ After deploying, make sure the live address is in Supabase's **Site URL** and **
 
 ## Day-to-day admin
 
-- **Approve new people:** they sign up at your site's address, then show up under **Users & access → Waiting for approval**. Approve them as Member or Viewer.
+- **Approve new people:** they sign up at your site's address, then show up under **Users & access → Waiting for approval**. Click **Approve…**, choose a role and their companies.
 - **Link accounts to people:** open a person in **People** and choose their **Login account**. Their new expenses then default to their own name.
-- **Let members see every expense:** **Workspace → Members can see everyone's expenses**.
-- **Budgets and categories:** **Workspace → Expense categories and monthly budgets**.
+- **Change what a role can do:** **Roles & permissions**, then tick or untick boxes.
+- **Budgets, categories and projects:** **Companies**, then click the company.
+- **Payment methods, units, departments:** **Settings**.
 - **Recover the admin role:** if you ever lock yourself out, run this in the Supabase SQL Editor:
   ```sql
   update public.profiles set role = 'admin', active = true where email = 'you@example.com';
@@ -174,7 +207,7 @@ aamaritoaid/
 - **Receipts** are in a private storage bucket; each person uploads into their own folder and files are opened through signed links that expire after 5 minutes.
 - The browser only hides buttons a role can't use. The database refuses the action either way.
 
-The permission rules were tested against Postgres 16 for admin, member, viewer, waiting and deactivated accounts, including attempts to self-approve, change one's own role, read salaries, forge audit entries and push stock below zero.
+The permission rules were tested against Postgres 16: upgrading from version 1 with data kept, admin, management, member, custom-role, company-limited, waiting and deactivated accounts, including attempts to self-approve, change one's own role or companies, read salaries, see another company's records, delete a role still in use, forge audit entries and push stock below zero.
 
 ---
 

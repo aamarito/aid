@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>aamaritoaid</title>
-  <meta name="description" content="aamaritoaid — your team's workspace for expenses, tasks, products and people.">
+  <meta name="description" content="aamaritoaid — the aamarito group workspace for expenses, tasks, products and people across aamarito, intivora and kukarz.">
   <meta name="theme-color" content="#0D2826">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -33,6 +33,8 @@
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20Z"/><path d="M12 10v4M12 17h.01"/></symbol>
     <symbol id="i-clip" viewBox="0 0 24 24"><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.3 3.3 0 0 1 4.7 4.7L10.2 17a1.7 1.7 0 0 1-2.4-2.4L15.5 7"/></symbol>
     <symbol id="i-out" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="m10 16-4-4 4-4"/><path d="M6 12h10"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24"><path d="M4 21V5l8-2v18"/><path d="M12 9h8v12"/><path d="M2 21h20"/><path d="M7 8h2M7 12h2M7 16h2M15 13h2M15 17h2"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9"/><path d="m17 6 3 3"/><path d="m15 8 2 2"/></symbol>
     <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></symbol>
   </svg>
 
@@ -52,6 +54,7 @@
       <header class="top">
         <div style="min-width:0"><span class="crumb" id="crumb">aamaritoaid</span><h1 id="pageTitle">Overview</h1></div>
         <div class="grow"></div>
+        <select class="sel co-switch" id="coSwitch" aria-label="Company shown" hidden></select>
         <button class="searchbtn" id="openSearch" type="button" aria-label="Search everything"><svg class="icon"><use href="#i-search"/></svg><span class="lbl">Search everything</span><kbd>Ctrl K</kbd></button>
         <div class="rel">
           <button class="btn pri" id="newBtn" type="button" aria-haspopup="menu" aria-expanded="false"><svg class="icon"><use href="#i-plus"/></svg><span class="hide-m">New</span></button>
